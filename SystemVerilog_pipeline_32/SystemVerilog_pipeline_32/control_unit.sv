@@ -1,0 +1,109 @@
+module control_unit (
+    input  logic [31:0] InstrD,
+    output logic [1:0]  RegSrcD,
+    output logic [1:0]  ImmSrcD,
+    output logic        ALUSrcD,
+    output logic [2:0]  ALUControlD,
+    output logic        MemtoRegD,
+    output logic        RegWriteD,
+    output logic        MemWriteD,
+    output logic        BranchD,
+    output logic        FlagWriteD,
+    output logic [3:0]  CondD
+);
+    logic [1:0] op;
+    logic       I;
+    logic [3:0] opcode;
+    logic       L;
+
+    assign CondD = InstrD[31:28];
+    assign op    = InstrD[27:26];
+    assign I     = InstrD[25];
+    assign opcode = InstrD[24:21];
+    assign L     = InstrD[20];
+
+    always_comb begin
+        RegSrcD     = 2'b00;
+        ImmSrcD     = 2'b00;
+        ALUSrcD     = 1'b0;
+        ALUControlD = 3'b000;
+        MemtoRegD   = 1'b0;
+        RegWriteD   = 1'b0;
+        MemWriteD   = 1'b0;
+        BranchD     = 1'b0;
+        FlagWriteD  = 1'b0;
+
+        unique case (op)
+            2'b00: begin // Data processing
+                RegWriteD  = 1'b1;
+                ALUSrcD    = I;
+                ImmSrcD    = 2'b00;
+                FlagWriteD = L;
+                unique case (opcode)
+                    4'b0100: ALUControlD = 3'b000; // ADD
+                    4'b0010: ALUControlD = 3'b001; // SUB
+                    4'b0000: ALUControlD = 3'b010; // AND
+                    4'b1100: ALUControlD = 3'b011; // ORR
+                    4'b1110: ALUControlD = 3'b100; // BIC
+                    4'b0001: ALUControlD = 3'b101; // EOR
+                    default: ALUControlD = 3'b000;
+                endcase
+            end
+            2'b01: begin // LDR/STR
+                ALUSrcD    = 1'b1;
+                ImmSrcD    = 2'b01;
+                ALUControlD = 3'b000;
+                
+                // TODO: How is this correct? shouldn't it be that REGSRCD = 01 for all memory instructions
+                RegSrcD[1] = ~L;
+                if (L) begin
+                    MemtoRegD = 1'b1;
+                    RegWriteD = 1'b1;
+                end else begin
+                    MemWriteD = 1'b1;
+                end
+            end
+            2'b10: begin // Branch
+                BranchD    = 1'b1;
+                ImmSrcD    = 2'b10;
+                RegSrcD[0] = 1'b1;
+            end
+            default: begin
+            end
+        endcase
+    end
+endmodule
+
+module condlogic (
+    input  logic [3:0] cond,
+    input  logic [3:0] flags,
+    output logic       condex
+);
+    logic N;
+    logic Z;
+    logic C;
+    logic V;
+
+    assign {N, Z, C, V} = flags;
+
+    always_comb begin
+        unique case (cond)
+            4'b0000: condex = Z;               // EQ
+            4'b0001: condex = ~Z;              // NE
+            4'b0010: condex = C;               // CS/HS
+            4'b0011: condex = ~C;              // CC/LO
+            4'b0100: condex = N;               // MI
+            4'b0101: condex = ~N;              // PL
+            4'b0110: condex = V;               // VS
+            4'b0111: condex = ~V;              // VC
+            4'b1000: condex = C & ~Z;          // HI
+            4'b1001: condex = ~C | Z;          // LS
+            4'b1010: condex = ~(N ^ V);        // GE
+            4'b1011: condex = (N ^ V);         // LT
+            4'b1100: condex = ~Z & ~(N ^ V);   // GT
+            4'b1101: condex = Z | (N ^ V);     // LE
+            4'b1110: condex = 1'b1;            // AL
+            default: condex = 1'b0;
+        endcase
+    end
+endmodule

@@ -1,0 +1,42 @@
+module alu #(
+    parameter int WIDTH = 32
+) (
+    input  logic [WIDTH-1:0] a,
+    input  logic [WIDTH-1:0] b,
+    input  logic [2:0]       alucontrol,
+    output logic [WIDTH-1:0] result,
+    output logic [3:0]       ALUFlags
+);
+    logic [WIDTH:0] sum_ext;
+    logic [WIDTH-1:0] cond_b;
+
+    always_comb begin
+        cond_b = (alucontrol[0]) ? ~b : b;
+        sum_ext = {1'b0, a} + {1'b0, cond_b} + alucontrol[0];
+
+        unique case (alucontrol)
+            3'b000: result = sum_ext[WIDTH-1:0];      // ADD
+            3'b001: result = sum_ext[WIDTH-1:0];      // SUB
+            3'b010: result = a & b;                   // AND
+            3'b011: result = a | b;                   // ORR
+            3'b100: result = a & ~b;                  // BIC
+            3'b101: result = a ^ b;                   // EOR
+            default: result = sum_ext[WIDTH-1:0];
+        endcase
+
+        ALUFlags[3] = result[WIDTH-1];                // N
+        ALUFlags[2] = (result == '0);                 // Z
+
+        if (alucontrol == 3'b000) begin
+            ALUFlags[1] = sum_ext[WIDTH];             // C
+            ALUFlags[0] = (~(a[WIDTH-1] ^ b[WIDTH-1])) & (a[WIDTH-1] ^ result[WIDTH-1]); // V
+        end else if (alucontrol == 3'b001) begin
+            ALUFlags[1] = sum_ext[WIDTH];             // C
+            ALUFlags[0] = (a[WIDTH-1] ^ b[WIDTH-1]) & (a[WIDTH-1] ^ result[WIDTH-1]);     // V
+        end else begin
+            ALUFlags[1] = 1'b0;
+            ALUFlags[0] = 1'b0;
+        end
+    end
+endmodule
+

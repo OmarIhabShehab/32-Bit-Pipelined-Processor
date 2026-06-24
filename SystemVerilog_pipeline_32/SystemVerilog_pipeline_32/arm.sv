@@ -1,0 +1,133 @@
+module arm #(
+    parameter int WIDTH = 32
+) (
+    input  logic             clk,
+    input  logic             reset,
+    output logic [WIDTH-1:0] PC,
+    input  logic [31:0]      Instr,
+    output logic             MemWrite,
+    output logic [WIDTH-1:0] ALUResult,
+    output logic [WIDTH-1:0] WriteData,
+    input  logic [WIDTH-1:0] ReadData
+);
+    logic [1:0]  RegSrcD;
+    logic [1:0]  ImmSrcD;
+    logic        ALUSrcD;
+    logic [2:0]  ALUControlD;
+    logic        MemtoRegD;
+    logic        RegWriteD;
+    logic        MemWriteD;
+    logic        BranchD;
+    logic        FlagWriteD;
+    logic [3:0]  CondD;
+    logic [31:0] InstrD;
+
+    logic [1:0]  ForwardAE;
+    logic [1:0]  ForwardBE;
+    logic        StallF;
+    logic        StallD;
+    logic        FlushD;
+    logic        FlushE;
+
+    logic [3:0]  RA1D;
+    logic [3:0]  RA2D;
+    logic [3:0]  RA1E;
+    logic [3:0]  RA2E;
+    logic [3:0]  WA3E;
+    logic [3:0]  WA3M;
+    logic [3:0]  WA3W;
+
+    logic        RegWriteM;
+    logic        RegWriteW;
+    logic        MemtoRegE;
+
+    logic        PCSrcD;
+    logic        PCSrcE;
+    logic        PCSrcM;
+    logic        PCSrcW;
+    logic        BranchTakenE;
+    logic        MemWriteM;
+
+    control_unit cu (
+        .InstrD(InstrD),
+        .RegSrcD(RegSrcD),
+        .ImmSrcD(ImmSrcD),
+        .ALUSrcD(ALUSrcD),
+        .ALUControlD(ALUControlD),
+        .MemtoRegD(MemtoRegD),
+        .RegWriteD(RegWriteD),
+        .MemWriteD(MemWriteD),
+        .BranchD(BranchD),
+        .FlagWriteD(FlagWriteD),
+        .CondD(CondD)
+    );
+
+    datapath #(.WIDTH(WIDTH)) dp (
+        .clk(clk),
+        .reset(reset),
+        .InstrF(Instr),
+        .ReadDataM(ReadData),
+        .RegSrcD(RegSrcD),
+        .ImmSrcD(ImmSrcD),
+        .ALUSrcD(ALUSrcD),
+        .ALUControlD(ALUControlD),
+        .MemtoRegD(MemtoRegD),
+        .RegWriteD(RegWriteD),
+        .MemWriteD(MemWriteD),
+        .BranchD(BranchD),
+        .FlagWriteD(FlagWriteD),
+        .CondD(CondD),
+        .ForwardAE(ForwardAE),
+        .ForwardBE(ForwardBE),
+        .StallF(StallF),
+        .StallD(StallD),
+        .FlushD(FlushD),
+        .FlushE(FlushE),
+        .PCF(PC),
+        .InstrD_out(InstrD),
+        .ALUOutM(ALUResult),
+        .WriteDataM(WriteData),
+        .MemWriteM(MemWriteM),
+        .RA1D(RA1D),
+        .RA2D(RA2D),
+        .RA1E(RA1E),
+        .RA2E(RA2E),
+        .WA3E(WA3E),
+        .WA3M(WA3M),
+        .WA3W(WA3W),
+        .RegWriteM(RegWriteM),
+        .RegWriteW(RegWriteW),
+        .MemtoRegE(MemtoRegE),
+        .PCSrcD(PCSrcD),
+        .PCSrcE(PCSrcE),
+        .PCSrcM(PCSrcM),
+        .PCSrcW(PCSrcW),
+        .BranchTakenE(BranchTakenE)
+    );
+
+    hazard_unit hu (
+        .RA1D(RA1D),
+        .RA2D(RA2D),
+        .RA1E(RA1E),
+        .RA2E(RA2E),
+        .WA3E(WA3E),
+        .WA3M(WA3M),
+        .WA3W(WA3W),
+        .RegWriteM(RegWriteM),
+        .RegWriteW(RegWriteW),
+        .MemtoRegE(MemtoRegE),
+        .PCSrcD(PCSrcD),
+        .PCSrcE(PCSrcE),
+        .PCSrcM(PCSrcM),
+        .PCSrcW(PCSrcW),
+        .BranchTakenE(BranchTakenE),
+        .ForwardAE(ForwardAE),
+        .ForwardBE(ForwardBE),
+        .StallD(StallD),
+        .StallF(StallF),
+        .FlushD(FlushD),
+        .FlushE(FlushE)
+    );
+
+    assign MemWrite = MemWriteM;
+endmodule

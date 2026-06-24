@@ -1,0 +1,187 @@
+module datapath #(
+    parameter int WIDTH = 32
+) (
+    input  logic             clk,
+    input  logic             reset,
+
+    input  logic [31:0]      InstrF,
+    input  logic [WIDTH-1:0] ReadDataM,
+
+    input  logic [1:0]       RegSrcD,
+    input  logic [1:0]       ImmSrcD,
+    input  logic             ALUSrcD,
+    input  logic [2:0]       ALUControlD,
+    input  logic             MemtoRegD,
+    input  logic             RegWriteD,
+    input  logic             MemWriteD,
+    input  logic             BranchD,
+    input  logic             FlagWriteD,
+    input  logic [3:0]       CondD,
+
+    input  logic [1:0]       ForwardAE,
+    input  logic [1:0]       ForwardBE,
+    input  logic             StallF,
+    input  logic             StallD,
+    input  logic             FlushD,
+    input  logic             FlushE,
+
+    output logic [WIDTH-1:0] PCF,
+    output logic [31:0]      InstrD_out,
+    output logic [WIDTH-1:0] ALUOutM,
+    output logic [WIDTH-1:0] WriteDataM,
+    output logic             MemWriteM,
+
+    output logic [3:0]       RA1D,
+    output logic [3:0]       RA2D,
+    output logic [3:0]       RA1E,
+    output logic [3:0]       RA2E,
+    output logic [3:0]       WA3E,
+    output logic [3:0]       WA3M,
+    output logic [3:0]       WA3W,
+
+    output logic             RegWriteM,
+    output logic             RegWriteW,
+    output logic             MemtoRegE,
+
+    output logic             PCSrcD,
+    output logic             PCSrcE,
+    output logic             PCSrcM,
+    output logic             PCSrcW,
+    output logic             BranchTakenE
+);
+
+    logic [WIDTH-1:0] PCNextF, PCPlus4F, Four;
+    logic [31:0]      InstrD;
+    
+    logic [WIDTH-1:0] PCD, PCPlus8D;
+    logic [WIDTH-1:0] RD1D, RD2D, ExtImmD;
+    
+    logic [WIDTH-1:0] RD1E, RD2E, ExtImmE, PCPlus8E;
+    logic [3:0]       CondE;
+    logic             ALUSrcE;
+    logic [2:0]       ALUControlE;
+    logic             MemtoRegE_raw, RegWriteE, MemWriteE, BranchE, FlagWriteE;
+    
+    logic [WIDTH-1:0] SrcAE, SrcBE_raw, SrcBE;
+    logic [WIDTH-1:0] ALUResultE, BranchTargetE;
+    logic [3:0]       ALUFlagsE, Flags;
+    logic             CondExE;
+    logic             MemtoRegE_eff, RegWriteE_eff, MemWriteE_eff;
+    
+    logic [WIDTH-1:0] ALUOutW, ReadDataW, ResultW;
+    logic             MemtoRegM, MemWriteM_raw, MemtoRegW;
+    logic [WIDTH-1:0] ResultM;
+
+
+    assign PCSrcD = RegWriteD & (InstrD[15:12] == 4'd15);
+
+    // Fetch stage
+    assign Four = logic [WIDTH-1:0]'(4);
+    adder #(.WIDTH(WIDTH)) pcadd4 (.a(PCF), .b(Four), .y(PCPlus4F));
+
+    always_comb begin
+        if (BranchTakenE) PCNextF = BranchTargetE;
+        else if (PCSrcW)  PCNextF = ResultW;
+        else              PCNextF = PCPlus4F;
+    end
+
+    flopenr #(.WIDTH(WIDTH)) pcreg (
+        .clk(clk), .reset(reset), .en(~StallF), .d(PCNextF), .q(PCF)
+    );
+
+    // F->D
+    flopenrc #(.WIDTH(32)) instrFD (
+        .clk(clk), .reset(reset), .en(~StallD), .clear(FlushD), .d(InstrF), .q(InstrD)
+    );
+    assign InstrD_out = InstrD;
+
+    flopenrc #(.WIDTH(WIDTH)) pcFD (
+        .clk(clk), .reset(reset), .en(~StallD), .clear(FlushD), .d(PCF), .q(PCD)
+    );
+
+
+    assign PCPlus8D = PCPlus4F;
+
+    // Decode stage
+    assign RA1D = (RegSrcD[0]) ? 4'd15 : InstrD[19:16];
+    assign RA2D = (RegSrcD[1]) ? InstrD[15:12] : InstrD[3:0];
+
+    extend #(.WIDTH(WIDTH)) ext (
+        .instr_imm(InstrD[23:0]), .immsrc(ImmSrcD), .extimm(ExtImmD)
+    );
+
+    regfile #(.WIDTH(WIDTH)) rf (
+        .clk(clk), .we3(RegWriteW), .a1(RA1D), .a2(RA2D), .a3(WA3W),
+        .wd3(ResultW), .r15(PCPlus8D), .rd1(RD1D), .rd2(RD2D)
+    );
+
+    // D->E Pipeline
+    flopenrc #(.WIDTH(WIDTH)) rd1DE     (.clk(clk), .reset(reset), .en(1'b1), .clear(FlushE), .d(RD1D), .q(RD1E));
+    flopenrc #(.WIDTH(WIDTH)) rd2DE     (.clk(clk), .reset(reset), .en(1'b1), .clear(FlushE), .d(RD2D), .q(RD2E));
+    flopenrc #(.WIDTH(WIDTH)) immDE     (.clk(clk), .reset(reset), .en(1'b1), .clear(FlushE), .d(ExtImmD), .q(ExtImmE));
+    flopenrc #(.WIDTH(WIDTH)) pc8DE     (.clk(clk), .reset(reset), .en(1'b1), .clear(FlushE), .d(PCPlus8D), .q(PCPlus8E));
+    
+    flopenrc #(.WIDTH(4))     ra1DE     (.clk(clk), .reset(reset), .en(1'b1), .clear(FlushE), .d(RA1D), .q(RA1E));
+    flopenrc #(.WIDTH(4))     ra2DE     (.clk(clk), .reset(reset), .en(1'b1), .clear(FlushE), .d(RA2D), .q(RA2E));
+    flopenrc #(.WIDTH(4))     wa3DE     (.clk(clk), .reset(reset), .en(1'b1), .clear(FlushE), .d(InstrD[15:12]), .q(WA3E));
+    flopenrc #(.WIDTH(4))     condDE    (.clk(clk), .reset(reset), .en(1'b1), .clear(FlushE), .d(CondD), .q(CondE));
+    
+    flopenrc #(.WIDTH(1))     alusrcDE  (.clk(clk), .reset(reset), .en(1'b1), .clear(FlushE), .d(ALUSrcD), .q(ALUSrcE));
+    flopenrc #(.WIDTH(3))     aluctrlDE (.clk(clk), .reset(reset), .en(1'b1), .clear(FlushE), .d(ALUControlD), .q(ALUControlE));
+    flopenrc #(.WIDTH(1))     memtoregDE(.clk(clk), .reset(reset), .en(1'b1), .clear(FlushE), .d(MemtoRegD), .q(MemtoRegE_raw));
+    flopenrc #(.WIDTH(1))     regwriteDE(.clk(clk), .reset(reset), .en(1'b1), .clear(FlushE), .d(RegWriteD), .q(RegWriteE));
+    flopenrc #(.WIDTH(1))     memwriteDE(.clk(clk), .reset(reset), .en(1'b1), .clear(FlushE), .d(MemWriteD), .q(MemWriteE));
+    flopenrc #(.WIDTH(1))     branchDE  (.clk(clk), .reset(reset), .en(1'b1), .clear(FlushE), .d(BranchD), .q(BranchE));
+    flopenrc #(.WIDTH(1))     flagwriteDE(.clk(clk), .reset(reset), .en(1'b1), .clear(FlushE), .d(FlagWriteD), .q(FlagWriteE));
+    
+
+    flopenrc #(.WIDTH(1))     pcsrcDE   (.clk(clk), .reset(reset), .en(1'b1), .clear(FlushE), .d(PCSrcD), .q(PCSrcE));
+
+    // Execute stage
+    assign ResultM = ALUOutM;
+    mux3 #(.WIDTH(WIDTH)) fwdA_mux (.d0(RD1E), .d1(ResultW), .d2(ResultM), .s(ForwardAE), .y(SrcAE));
+    mux3 #(.WIDTH(WIDTH)) fwdB_mux (.d0(RD2E), .d1(ResultW), .d2(ResultM), .s(ForwardBE), .y(SrcBE_raw));
+    mux2 #(.WIDTH(WIDTH)) srcb_mux (.d0(SrcBE_raw), .d1(ExtImmE), .s(ALUSrcE), .y(SrcBE));
+
+    alu #(.WIDTH(WIDTH)) alu_i (.a(SrcAE), .b(SrcBE), .alucontrol(ALUControlE), .result(ALUResultE), .ALUFlags(ALUFlagsE));
+
+    adder #(.WIDTH(WIDTH)) branch_add (.a(PCPlus8E), .b(ExtImmE), .y(BranchTargetE));
+
+    condlogic cond_e (.cond(CondE), .flags(Flags), .condex(CondExE));
+
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) Flags <= 4'b0000;
+        else if (FlagWriteE && CondExE) Flags <= ALUFlagsE;
+    end
+
+    assign BranchTakenE = BranchE & CondExE;
+    assign MemtoRegE_eff = MemtoRegE_raw & CondExE;
+    assign RegWriteE_eff = RegWriteE & CondExE;
+    assign MemWriteE_eff = MemWriteE & CondExE;
+    assign MemtoRegE = MemtoRegE_eff;
+
+    // E->M Pipeline
+    flopr #(.WIDTH(WIDTH)) aluEM      (.clk(clk), .reset(reset), .d(ALUResultE), .q(ALUOutM));
+    flopr #(.WIDTH(WIDTH)) wdEM       (.clk(clk), .reset(reset), .d(SrcBE_raw), .q(WriteDataM));
+    flopr #(.WIDTH(4))     wa3EM      (.clk(clk), .reset(reset), .d(WA3E), .q(WA3M));
+    flopr #(.WIDTH(1))     memtoregEM (.clk(clk), .reset(reset), .d(MemtoRegE_eff), .q(MemtoRegM));
+    flopr #(.WIDTH(1))     regwriteEM (.clk(clk), .reset(reset), .d(RegWriteE_eff), .q(RegWriteM));
+    flopr #(.WIDTH(1))     memwriteEM (.clk(clk), .reset(reset), .d(MemWriteE_eff), .q(MemWriteM_raw));
+    
+
+    flopr #(.WIDTH(1))     pcsrcEM    (.clk(clk), .reset(reset), .d(PCSrcE), .q(PCSrcM)); 
+
+    // M->W Pipeline
+    flopr #(.WIDTH(WIDTH)) aluMW      (.clk(clk), .reset(reset), .d(ALUOutM), .q(ALUOutW));
+    flopr #(.WIDTH(WIDTH)) rdMW       (.clk(clk), .reset(reset), .d(ReadDataM), .q(ReadDataW));
+    flopr #(.WIDTH(4))     wa3MW      (.clk(clk), .reset(reset), .d(WA3M), .q(WA3W));
+    flopr #(.WIDTH(1))     memtoregMW (.clk(clk), .reset(reset), .d(MemtoRegM), .q(MemtoRegW));
+    flopr #(.WIDTH(1))     regwriteMW (.clk(clk), .reset(reset), .d(RegWriteM), .q(RegWriteW));
+    
+
+    flopr #(.WIDTH(1))     pcsrcMW    (.clk(clk), .reset(reset), .d(PCSrcM), .q(PCSrcW)); 
+
+    assign MemWriteM = MemWriteM_raw;
+
+    mux2 #(.WIDTH(WIDTH)) wb_mux (.d0(ALUOutW), .d1(ReadDataW), .s(MemtoRegW), .y(ResultW));
+endmodule
